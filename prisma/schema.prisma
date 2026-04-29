@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
+  chats     Chat[]
+
+  @@map("users")
+}
+
+model Chat {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  fileHash String
+
+  title String @default("Untitled Chat")
+
+  rawText String @db.Text
+
+  fileUrl    String?
+  parsedJson Json?
+
+  tone   String @default("COACH")
+  status          String @default("UPLOADED")
+
+  sourceApp       String
+  messageCount    Int
+  participants    String[]
+  userParticipant String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  analysis            ChatAnalysis?
+  chatParticipants    ChatParticipant[]
+  participantAnalysis ParticipantAnalysis[]
+  chunks              Chunk[]
+  @@index([userId])
+  @@index([fileHash])
+  @@map("file_chats")
+}
+
+model ChatAnalysis {
+  id                 String   @id @default(cuid())
+  chatId             String   @unique
+  chat               Chat     @relation(fields: [chatId], references: [id])
+  summary            String?  @db.Text
+  compatibilityScore Int
+  userInsights       Json
+  overallInsights    Json
+  tone               String
+  createdAt          DateTime @default(now())
+
+  @@index([chatId])
+  @@map("chat_analyses")
+}
+
+model Participant {
+  id        String                @id @default(cuid())
+  name      String
+  userId    String
+  chats     ChatParticipant[]
+  createdAt DateTime              @default(now())
+  analyses  ParticipantAnalysis[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("participants")
+}
+
+model ChatParticipant {
+  id            String @id @default(cuid())
+  chatId        String
+  participantId String
+
+  chat        Chat        @relation(fields: [chatId], references: [id])
+  participant Participant @relation(fields: [participantId], references: [id])
+
+  @@unique([chatId, participantId], name: "chatId_participantId")
+  @@map("chat_participants")
+}
+
+model ParticipantAnalysis {
+  id                String      @id @default(cuid())
+  chatId            String
+  chat              Chat        @relation(fields: [chatId], references: [id])
+  participantId     String
+  participant       Participant @relation(fields: [participantId], references: [id])
+  traits            Json
+  emotions          Json
+  mbtiType          String
+  mbtiMeta          Json
+  behaviourPatterns Json
+  createdAt         DateTime    @default(now())
+
+  @@index([chatId])
+  @@map("participant_analyses")
+}
+
+model Chunk{
+  id   String   @id @default(cuid())
+
+  chatId        String
+
+  order         Int
+
+  content       String   @db.Text
+
+  chunkHash     String   @unique
+
+  status        String   @default("READY")
+
+  summary       String?  @db.Text
+
+  embeddingId   String?
+
+  tokenCount    Int?
+
+  createdAt     DateTime @default(now())
+
+  chat          Chat @relation(fields: [chatId], references: [id])
+  @@map("chunks")
+
+}
+
+
+model ChatProcessingState {
+  id             String @id @default(cuid())
+  chatId         String @unique
+  lastChunkIndex Int
+  rollingSummary String
+}
+
