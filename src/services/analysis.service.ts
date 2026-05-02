@@ -1,233 +1,310 @@
+import { preLlmGuard } from "../ai/preLlmGuard";
+import { chatAnalysisSchema } from "../schemas/analysis.schema";
+import { callLLM } from "./llm.service";
+import { generateHash } from "../utils/hash.utils";
 import prisma from "../utils/prisma";
-import { parseChunkContent } from "../utils/chatParser";
-import { callLLM } from "./llm.mock";
 
-export async function analyzeChatService(
-  chatId: string,
-  userId: string
-) {
+type ChatWithChunks = NonNullable<
+  Awaited<ReturnType<typeof getChatWithChunks>>
+>;
 
-  // VERIFY CHAT OWNERSHIP
-  const chat = await prisma.chat.findFirst({
+async function getChatWithChunks(chatId: string, userId: string) {
+  return prisma.chat.findFirst({
     where: {
       id: chatId,
       userId,
     },
+    include: {
+      chunks: {
+        orderBy: {
+          order: "asc",
+        },
+      },
+      analysis: true,
+    },
   });
+}
+
+function buildAggregatedChunkText(chat: ChatWithChunks) {
+  const aggregateFromChunks = chat.chunks
+    .map((chunk) => chunk.content)
+    .join("\n\n")
+    .trim();
+
+  return aggregateFromChunks || chat.rawText || "";
+}
+
+async function findAnalyzedChatByHash(fileHash: string, currentChatId: string) {
+  return prisma.chat.findFirst({
+    where: {
+      fileHash,
+      status: "ANALYZED",
+      NOT: {
+        id: currentChatId,
+      },
+    },
+    include: {
+      analysis: true,
+      participantAnalysis: {
+        include: {
+          participant: true,
+        },
+      },
+    },
+  });
+}
+
+async function copyCachedAnalysis(params: {
+  sourceChat: NonNullable<Awaited<ReturnType<typeof findAnalyzedChatByHash>>>;
+  targetChat: ChatWithChunks;
+  fileHash: string;
+}) {
+  const { sourceChat, targetChat, fileHash } = params;
+
+  if (!sourceChat.analysis) {
+    throw new Error("Cached analysis missing");
+  }
+
+  const existingAnalysis = await prisma.chatAnalysis.findUnique({
+    where: {
+      chatId: targetChat.id,
+    },
+  });
+
+  if (existingAnalysis) {
+    await prisma.chat.update({
+      where: {
+        id: targetChat.id,
+      },
+      data: {
+        fileHash,
+        status: "ANALYZED",
+      },
+    });
+
+    return existingAnalysis;
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const analysis = await tx.chatAnalysis.create({
+      data: {
+        chatId: targetChat.id,
+        summary: sourceChat.analysis!.summary,
+        compatibilityScore: sourceChat.analysis!.compatibilityScore,
+        userInsights: sourceChat.analysis!.userInsights as any,
+        overallInsights: sourceChat.analysis!.overallInsights as any,
+        tone: sourceChat.analysis!.tone,
+      },
+    });
+
+    for (const cachedParticipant of sourceChat.participantAnalysis) {
+      const participant = await tx.participant.upsert({
+        where: {
+          userId_name: {
+            userId: targetChat.userId,
+            name: cachedParticipant.participant.name,
+          },
+        },
+        update: {},
+        create: {
+          name: cachedParticipant.participant.name,
+          userId: targetChat.userId,
+        },
+      });
+
+      await tx.chatParticipant.upsert({
+        where: {
+          chatId_participantId: {
+            chatId: targetChat.id,
+            participantId: participant.id,
+          },
+        },
+        update: {},
+        create: {
+          chatId: targetChat.id,
+          participantId: participant.id,
+        },
+      });
+
+      await tx.participantAnalysis.create({
+        data: {
+          chatId: targetChat.id,
+          participantId: participant.id,
+          traits: cachedParticipant.traits as any,
+          emotions: cachedParticipant.emotions as any,
+          mbtiType: cachedParticipant.mbtiType,
+          mbtiMeta: cachedParticipant.mbtiMeta as any,
+          behaviourPatterns: cachedParticipant.behaviourPatterns as any,
+        },
+      });
+    }
+
+    await tx.chat.update({
+      where: {
+        id: targetChat.id,
+      },
+      data: {
+        fileHash,
+        status: "ANALYZED",
+      },
+    });
+
+    return analysis;
+  });
+}
+
+export async function analyzeChatService(chatId: string, userId: string) {
+  const chat = await getChatWithChunks(chatId, userId);
 
   if (!chat) {
     throw new Error("Chat not found or unauthorized");
   }
 
- 
-  // 2. PREVENT DUPLICATE ANALYSIS
- 
-  if (chat.status === "PROCESSING") {
+  if (chat.analysis && chat.status === "ANALYZED") {
+    return chat.analysis;
+  }
 
+  const aggregatedText = buildAggregatedChunkText(chat);
+
+  if (!aggregatedText) {
+    throw new Error("No chat content available for analysis");
+  }
+
+  const aggregateFileHash = generateHash(aggregatedText);
+
+  const cachedChat = await findAnalyzedChatByHash(aggregateFileHash, chat.id);
+
+  if (cachedChat?.analysis) {
+    return copyCachedAnalysis({
+      sourceChat: cachedChat,
+      targetChat: chat,
+      fileHash: aggregateFileHash,
+    });
+  }
+
+  const processingChat = await prisma.chat.findFirst({
+    where: {
+      fileHash: aggregateFileHash,
+      status: "PROCESSING",
+      NOT: {
+        id: chat.id,
+      },
+    },
+  });
+
+  if (processingChat) {
     return {
       status: "PROCESSING",
-      message: "Analysis already running",
+      message: "Analysis in progress, try again shortly",
     };
   }
 
-  if (chat.status === "ANALYZED") {
-
-    return {
-      status: "ANALYZED",
-      message: "Chat already analyzed",
-    };
-  }
-
- 
-  // MARK CHAT AS PROCESSING
-  
   await prisma.chat.update({
     where: {
-      id: chatId,
+      id: chat.id,
     },
     data: {
+      fileHash: aggregateFileHash,
       status: "PROCESSING",
     },
   });
 
-  
-  // FETCH CHUNKS IN ORDER
-  
-  const chunks = await prisma.chunk.findMany({
-    where: {
-      chatId,
-    },
-    orderBy: {
-      order: "asc",
-    },
-  });
+  try {
+    const guard = preLlmGuard(aggregatedText);
 
-  if (!chunks.length) {
-    throw new Error("No chunks found");
-  }
-
- 
-  //  RESTORE PREVIOUS STATE
- 
-
-  let rollingSummary = "";
-  let lastProcessedChunk = 0;
-
-  // Find latest summarized chunk
-  const latestProcessedChunk =
-    await prisma.chunk.findFirst({
-      where: {
-        chatId,
-        summary: {
-          not: null,
-        },
-      },
-      orderBy: {
-        order: "desc",
-      },
-    });
-
-  // Restore state from latest chunk
-  if (latestProcessedChunk) {
-
-    rollingSummary =
-      latestProcessedChunk.summary || "";
-
-    lastProcessedChunk =
-      latestProcessedChunk.order;
-  }
-
-
-  //  PROCESS CHUNKS SEQUENTIALLY
-   
-  for (const chunk of chunks) {
-
-    // Skip already processed chunks
-    if (chunk.order <= lastProcessedChunk) {
-      continue;
+    if (!guard.safeForLlm) {
+      throw new Error(`LLM input blocked: ${guard.warnings.join(" ")}`);
     }
 
+    if (guard.warnings.length > 0) {
+      console.warn("Pre-LLM guard warnings:", guard.warnings);
+    }
 
-      // PARSE CURRENT CHUNK
-  
-    const parsedMessages =
-      parseChunkContent(chunk.content);
-      
-      console.log(parsedMessages);
-
-   
-      // FORMAT PARSED MESSAGES FOR LLM INPUT
-    
-    const formattedText =
-      parsedMessages
-        .map((msg) => {
-          return `[${msg.timestamp}] ${msg.sender}: ${msg.message}`;
-        })
-        .join("\n");
-
-    
-      // BUILD FINAL INPUT
-    
-    const llmInput = `
-PREVIOUS SUMMARY:
-${rollingSummary}
-
-CURRENT CHAT CHUNK:
-${formattedText}
-`;
-
-
-      // CALL LLM
- 
     const llmResponse = await callLLM({
-      text: llmInput,
-
-      participants: chat.participants,
-
-      userParticipant: chat.userParticipant,
-
-      tone: chat.tone,
+      text: guard.compressedText,
+      participants: chat.participants ?? [],
+      userParticipant: chat.userParticipant ?? null,
+      tone: chat.tone ?? "COACH",
     });
 
-   
-    //  UPDATED SUMMARY
-    
-    const updatedSummary =
-      llmResponse.summary;
+    const parsed = chatAnalysisSchema.parse(llmResponse);
 
-   
-      // STORE SUMMARY INSIDE CURRENT CHUNK
-   
-    await prisma.chunk.update({
+    return prisma.$transaction(async (tx) => {
+      const analysis = await tx.chatAnalysis.create({
+        data: {
+          chatId: chat.id,
+          summary: parsed.summary,
+          compatibilityScore: parsed.compatibilityScore,
+          userInsights: parsed.userInsights,
+          overallInsights: parsed.overallInsights,
+          tone: chat.tone,
+        },
+      });
+
+      for (const analyzedParticipant of parsed.participants) {
+        const participant = await tx.participant.upsert({
+          where: {
+            userId_name: {
+              userId: chat.userId,
+              name: analyzedParticipant.name,
+            },
+          },
+          update: {},
+          create: {
+            name: analyzedParticipant.name,
+            userId: chat.userId,
+          },
+        });
+
+        await tx.chatParticipant.upsert({
+          where: {
+            chatId_participantId: {
+              chatId: chat.id,
+              participantId: participant.id,
+            },
+          },
+          update: {},
+          create: {
+            chatId: chat.id,
+            participantId: participant.id,
+          },
+        });
+
+        await tx.participantAnalysis.create({
+          data: {
+            chatId: chat.id,
+            participantId: participant.id,
+            traits: analyzedParticipant.traits,
+            emotions: analyzedParticipant.emotions,
+            mbtiType: analyzedParticipant.mbti.type,
+            mbtiMeta: analyzedParticipant.mbti,
+            behaviourPatterns: analyzedParticipant.behaviourPatterns,
+          },
+        });
+      }
+
+      await tx.chat.update({
+        where: {
+          id: chat.id,
+        },
+        data: {
+          fileHash: aggregateFileHash,
+          status: "ANALYZED",
+        },
+      });
+
+      return analysis;
+    });
+  } catch (error) {
+    await prisma.chat.update({
       where: {
-        id: chunk.id,
+        id: chat.id,
       },
       data: {
-        summary: updatedSummary,
-        status: "SUMMARIZED",
+        status: "CHUNKED",
       },
     });
 
-   
-    //  UPDATE ROLLING SUMMARY
-     
-    rollingSummary = updatedSummary;
-
-  
-    //  UPDATE PROCESSING STATE
-  
-    await prisma.chatProcessingState.upsert({
-      where: {
-        chatId,
-      },
-
-      update: {
-        lastChunkIndex: chunk.order,
-        rollingSummary,
-      },
-
-      create: {
-        chatId,
-        lastChunkIndex: chunk.order,
-        rollingSummary,
-      },
-    });
+    throw error;
   }
-
-  
-  //  CREATE FINAL ANALYSIS
-
-  const finalAnalysis =
-    await prisma.chatAnalysis.create({
-      data: {
-        chatId,
-
-        summary: rollingSummary,
-
-        compatibilityScore: 0,
-
-        userInsights: {},
-
-        overallInsights: {},
-
-        tone: chat.tone,
-      },
-    });
-
- 
-    // MARK CHAT AS ANALYZED
-  
-  await prisma.chat.update({
-    where: {
-      id: chatId,
-    },
-    data: {
-      status: "ANALYZED",
-    },
-  });
-
-  
-  // RETURN FINAL ANALYSIS
-  
-  return finalAnalysis;
 }

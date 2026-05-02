@@ -1,33 +1,46 @@
 type ParsedMessage = {
-   sender: string;
-   message: string;
-   timestamp: string;
-};
+    sender : string,
+    message: string,
+    timestamp: string,
+}
 
-export function parseChunkContent(
-   content: string
-): ParsedMessage[] {
+type ParsedResult = {
+    rawText: string,
+    parsedMessages: ParsedMessage[],
+    participants: string[],
+    messageCount: number,
+}
 
-   const lines = content.split("\n");
+export function parseChatFile(buffer: Buffer): ParsedResult {
+    
+  const rawText = buffer.toString("utf-8");
 
-   const messages: ParsedMessage[] = [];
+  const lines = rawText.split("\n");
 
-   for (const line of lines) {
+  const messages: ParsedMessage[] = [];
+  const participantsSet = new Set<string>();
 
-      const match = line.match(
-         /^(.+?) - (.+?): (.+)$/
-      );
+  for (const line of lines) {
+    // Basic WhatsApp regex
+    const match = line.match(/^(.+?) - (.+?): (.+)$/);
 
-      if (!match) continue;
+    if (!match) continue;
 
-      const [, timestamp, sender, message] = match;
+    const [, timestamp, sender, message] = match;
 
-      messages.push({
-         timestamp: timestamp.trim(),
-         sender: sender.trim(),
-         message: message.trim(),
-      });
-   }
+    messages.push({
+      sender: sender.trim(),
+      message: message.trim(),
+      timestamp: timestamp.trim(),
+    });
 
-   return messages;
+    participantsSet.add(sender.trim());
+  }
+
+  return {
+    rawText,
+    parsedMessages: messages,
+    participants: Array.from(participantsSet),
+    messageCount: messages.length,
+  };
 }

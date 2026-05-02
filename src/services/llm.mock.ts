@@ -6,7 +6,7 @@ type LLMInput = {
 };
 
 export async function callLLM(input: LLMInput) {
-  console.log(" MOCK LLM CALLED");
+  console.log("🧪 MOCK LLM CALLED");
 
   // simulate delay (important to mimic real behavior)
   await new Promise((res) => setTimeout(res, 500));

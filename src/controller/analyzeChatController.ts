@@ -53,6 +53,18 @@ export const analyzeChatController = async (
       });
     }
 
+    if (error.message === "No chat content available for analysis") {
+      return reply.status(400).send({
+        message: error.message,
+      });
+    }
+
+    if (error.message?.startsWith("LLM input blocked")) {
+      return reply.status(400).send({
+        message: error.message,
+      });
+    }
+
     // Zod validation failure (LLM response broken)
     if (error.name === "ZodError") {
       return reply.status(500).send({
