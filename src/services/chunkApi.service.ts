@@ -18,7 +18,7 @@ export async function chunkDocument(
   );
 
   const response = await fetch(
-    "https://document-chunker.onrender.com/chat/chunk/api",
+    "https://document-chunker.onrender.com/chat/chunk/message/api",
     {
       method: "POST",
       body: formData,

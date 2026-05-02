@@ -44,16 +44,17 @@ export async function uploadChatService(data: UploadChatInput){
     }
     });
     
-    console.log(
-  chunkData.chunks.map((chunk:Chunk) => ({
-     content: chunk.content,
-     hash: generateHash(chunk.content)
+ console.log(
+  chunkData.map((chunk: Chunk) => ({
+    content: chunk.content,
+    hash: generateHash(chunk.content)
   }))
 );
 
     //create chunk entities
- await prisma.chunk.createMany({
-   data: chunkData.chunks.map((chunk: Chunk) => ({
+ // create chunk entities
+await prisma.chunk.createMany({
+   data: chunkData.map((chunk: Chunk) => ({
       chatId: chat.id,
 
       order: chunk.order,
@@ -69,33 +70,4 @@ export async function uploadChatService(data: UploadChatInput){
 });
 return chat;
 }
- 
-
-// export async function uploadChatService(data: UploadChatInput){
-//     const { userId, fileBuffer, fileUrl, sourceApp, tone = "COACH" } = data;
-
-//     // Parse file
-//     const parsed = parseChatFile(fileBuffer);
-
-//     // Generate fileHash from raw text (deterministic)
-//     const fileHash = generateHash(parsed.rawText);
-
-//     // Save to database
-//     const chat = await prisma.chat.create({
-//         data: {
-//             userId,
-//             fileHash,
-//             rawText: parsed.rawText,
-//             parsedJson: parsed.parsedMessages,
-//             participants: parsed.participants,
-//             messageCount: parsed.messageCount,
-//             fileUrl: fileUrl || null,
-//             sourceApp,
-//             tone: tone || "COACH",
-//             status: "UPLOADED",
-//         }
-//     });
-    
-//     return chat;
-// }
  
