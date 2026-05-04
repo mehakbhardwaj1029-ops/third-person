@@ -7,6 +7,8 @@ import cookie from '@fastify/cookie'
 import { userRoutes } from "./routes/user.route";
 import multipart from '@fastify/multipart';
 import { uploadFileRoutes } from './routes/uploadFile.route';
+import  rateLimit from '@fastify/rate-limit'
+
 const app = Fastify({ logger: true });
 
 app.register(cors,{
@@ -24,11 +26,6 @@ app.register(multipart, {
    }
 });
 
-
-app.get("/health",async ()=>{
-  return {status:"OK"}
-})
-
 app.register(userRoutes, {prefix: '/api/users'});
 app.register(uploadFileRoutes, {prefix: '/api/chats'});
 
@@ -44,6 +41,14 @@ listeners.forEach((signal) => {
 
 const start = async () => {
   try {
+    await app.register(rateLimit, {
+      global: true,
+      max: 5,
+      timeWindow: '1 minute'
+    })
+    app.get("/health",async ()=>{
+      return {status:"OK"}
+    })
     await app.listen({ port: 5000, host: "0.0.0.0" });
   } catch (err) {
     app.log.error(err);

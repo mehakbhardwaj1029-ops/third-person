@@ -20,12 +20,12 @@ type Chunk = {
 
 
 export async function uploadChatService(data: UploadChatInput){
-    const { userId, fileBuffer,filename, fileUrl, sourceApp, tone = "COACH" } = data;
+    const { userId, fileBuffer,filename, fileUrl, sourceApp, tone = "COACH" } = data;    // issue - file is getting uploaded twice ,one while hitting controller and then while chunking
 
     //call chunk service
-    const chunkData = await chunkDocument(fileBuffer,filename);
-    console.log(chunkData);  //verify doc-chunker service
-
+    const { chunks, participants} = await chunkDocument(fileBuffer,filename);
+    console.log(chunks);  
+    console.log(participants);
     //create chat
     const chat = await prisma.chat.create({
     data: {
@@ -38,23 +38,22 @@ export async function uploadChatService(data: UploadChatInput){
 
         // temporary placeholders
         messageCount: 0,
-        participants: [],
+        participants,
         fileHash: "",    // will add in future
         rawText: "",
     }
     });
     
  console.log(
-  chunkData.map((chunk: Chunk) => ({
+  chunks.map((chunk: Chunk) => ({
     content: chunk.content,
     hash: generateHash(chunk.content)
   }))
 );
 
-    //create chunk entities
  // create chunk entities
 await prisma.chunk.createMany({
-   data: chunkData.map((chunk: Chunk) => ({
+   data: chunks.map((chunk: Chunk) => ({
       chatId: chat.id,
 
       order: chunk.order,

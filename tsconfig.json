@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "types": ["node","fastify"]
   },
-  "include": ["src","scripts"],
+  "include": ["src"],
 }

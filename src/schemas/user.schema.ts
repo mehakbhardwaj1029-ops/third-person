@@ -1,13 +1,11 @@
 import {z} from 'zod';
 
-//data needed foe user to register
 export const createUserSchema = z.object({
     email:z.string().email("Invalid email adress").toLowerCase().trim(),
     password: z.string().min(6, "Password must be at least 6 characters long"),
     name: z.string().min(1).trim(),
 }).strict();
 
-//response for registering user
 
 export const createUserResponseSchema = z.object({
     id: z.string(),
@@ -16,13 +14,11 @@ export const createUserResponseSchema = z.object({
     createdAt: z.string().datetime(),
 }).strict();
 
-//login user scehma
 export const loginUserSchema = z.object({
     email:z.string().email("Invalid email adress").toLowerCase().trim(),
     password: z.string().min(6),
 }).strict();
 
-//login response
 export const loginResponseSchema = z.object({
 
     accessToken: z.string(),

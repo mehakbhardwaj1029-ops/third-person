@@ -105,6 +105,7 @@ model ParticipantAnalysis {
   createdAt         DateTime    @default(now())
 
   @@index([chatId])
+  @@unique([chatId, participantId], name: "chatId_participantId")
   @@map("participant_analyses")
 }
 
@@ -121,7 +122,7 @@ model Chunk{
 
   status        String   @default("READY")
 
-  summary       String?  @db.Text
+  summary       Json?
 
   embeddingId   String?
 
@@ -130,7 +131,6 @@ model Chunk{
   createdAt     DateTime @default(now())
 
   chat          Chat @relation(fields: [chatId], references: [id])
-  @@map("chunks")
 
 }
 
@@ -139,6 +139,7 @@ model ChatProcessingState {
   id             String @id @default(cuid())
   chatId         String @unique
   lastChunkIndex Int
-  rollingSummary String
+  rollingSummary Json?
+  status         String @default("PROCESSING") 
 }
 

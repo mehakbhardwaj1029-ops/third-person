@@ -3,12 +3,16 @@ type LLMInput = {
   participants: string[];
   userParticipant?: string | null;
   tone: string;
+
+  previousState?: any; 
 };
 
-export async function callLLM(input: LLMInput) {
-  console.log(" MOCK LLM CALLED");
 
-  // simulate delay (important to mimic real behavior)
+
+export async function callLLM(input: LLMInput) {
+  console.log(" participants in llm call ", input.participants);
+
+  // simulate delay 
   await new Promise((res) => setTimeout(res, 500));
 
   return {

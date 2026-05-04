@@ -16,10 +16,8 @@ export async function registerUser(data: CreateUserInput){
         throw new Error("Not allowed");
     }
 
-    //hash password
     const hashedPassword = await bcrypt.hash(password,10);
 
-    //create user
     const user = await prisma.user.create({
         data: {
             email,
@@ -56,7 +54,6 @@ export async function loginUser(data: LoginUserInput){
     if(!jwtsecret){
         throw new Error("JWT_SECRET is not defined in env")
     }
-    //generate token
     const token = jwt.sign(
         {userId: user.id, email:user.email},
           jwtsecret as string,

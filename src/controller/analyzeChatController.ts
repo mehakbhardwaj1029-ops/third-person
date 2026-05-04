@@ -3,7 +3,6 @@ import '../types/fastify.d';
 import { analyzeChatService } from "../services/analysis.service";
 import prisma from "../utils/prisma";
 
-// Analyze chat and fetch results
 export const analyzeChatController = async (
   request: FastifyRequest,
   reply: FastifyReply
@@ -25,35 +24,27 @@ export const analyzeChatController = async (
       });
     }
 
-    // Call analysis service (fileHash is fetched from DB internally)
     const analysis = await analyzeChatService(chatId, userId);
 
-    // Handle processing response
     if ("status" in analysis && analysis.status === "PROCESSING") {
       return reply.status(202).send({
         message: "Analysis in progress",
         status: "PROCESSING",
       });
     }
-
-    // At this point, analysis is guaranteed to be ChatAnalysis type
-    const chatAnalysis = analysis as { id: string; [key: string]: any };
     
     return reply.status(200).send({
       message: "Analysis completed successfully",
-      analysisId: chatAnalysis.id,
     });
 
   } catch (error: any) {
 
-    // Known business errors
     if (error.message === "Chat not found or unauthorized") {
       return reply.status(404).send({
         message: error.message,
       });
     }
 
-    // Zod validation failure (LLM response broken)
     if (error.name === "ZodError") {
       return reply.status(500).send({
         message: "Invalid AI response format",
@@ -61,7 +52,6 @@ export const analyzeChatController = async (
       });
     }
 
-    // Fallback
     console.error("Analyze Chat Error:", error);
 
     return reply.status(500).send({
@@ -70,7 +60,6 @@ export const analyzeChatController = async (
   }
 };
 
-// Get chat analysis results
 export const getChatAnalysisController = async (
   request: FastifyRequest,
   reply: FastifyReply
@@ -94,27 +83,26 @@ export const getChatAnalysisController = async (
       });
     }
 
-    const analysis = await prisma.chatAnalysis.findFirst({
+    const state = await prisma.chatProcessingState.findUnique({
       where: { chatId },
     });
 
-    if (!analysis) {
-      return reply.status(202).send({
-        message: "Analysis not yet available",
-        status: "PROCESSING",
+    if (!state) {
+      return reply.send({
+        status: "NOT_STARTED",
+        rollingSummary: null,
       });
     }
 
-    const participants = await prisma.participantAnalysis.findMany({
-      where: { chatId },
+    return reply.send({
+      status: state.status,
+      rollingSummary: state.rollingSummary,
+      lastChunkIndex: state.lastChunkIndex,
     });
 
-    return reply.send({
-      analysis,
-      participants,
-    });
   } catch (error: any) {
     console.error("Get Analysis Error:", error);
+
     return reply.status(500).send({
       message: "Internal Server Error",
     });

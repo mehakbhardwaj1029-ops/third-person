@@ -4,10 +4,6 @@ import { loginController, registerController } from "../controller/auth.controll
 
 export async function userRoutes(app: FastifyInstance ){
 
-    // app.get('/',(request: FastifyRequest, reply: FastifyReply)=>{
-    //     reply.send({message: '/ route hit'})
-    // });
-
     app.post('/register',{
         handler: registerController
     });

@@ -13,6 +13,5 @@ export async function generateHashPreHandler(
 
   const fileHash = generateHash(body.chat);
 
-  // attach to request for next handlers
   (request as any).fileHash = fileHash;
 }
