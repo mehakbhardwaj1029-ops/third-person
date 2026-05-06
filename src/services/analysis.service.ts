@@ -1,6 +1,7 @@
 import prisma from "../utils/prisma";
 import { parseChunkContent } from "../utils/chatParser";
 import { callLLM } from "./llm.mock";
+import { preLlmGuard } from "../ai/preLlmGuard";
 type LLMResponse = {
   summary: string;
 
@@ -104,6 +105,24 @@ async function processChunks(chat: any, chunks: any[]) {
     const formatted = parsed
       .map((m) => `[${m.timestamp}] ${m.sender}: ${m.message}`)
       .join("\n");
+
+      const guard = preLlmGuard(formatted); 
+
+      if(!guard.safeForLlm){    // should we not break it early after getting , what if because of few spams we might loose real insights
+        await prisma.chatProcessingState.update({
+        where: { chatId: chat.id },
+        data: {
+          status: "BLOCKED",
+          rollingSummary: {
+            error: "Blocked due to unsafe content",
+            riskLevel: guard.riskLevel,
+            detectedPatterns: guard.detectedPatterns,
+          },
+        },
+      });
+
+      throw new Error("LLM blocked due to high-risk input");
+      }
 
     const response: LLMResponse = await callLLM({
       text: formatted,

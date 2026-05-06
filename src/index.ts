@@ -8,6 +8,7 @@ import { userRoutes } from "./routes/user.route";
 import multipart from '@fastify/multipart';
 import { uploadFileRoutes } from './routes/uploadFile.route';
 import  rateLimit from '@fastify/rate-limit'
+import chatRoutes from './routes/chat.route';
 
 const app = Fastify({ logger: true });
 
@@ -28,7 +29,7 @@ app.register(multipart, {
 
 app.register(userRoutes, {prefix: '/api/users'});
 app.register(uploadFileRoutes, {prefix: '/api/chats'});
-
+app.register(chatRoutes, {prefix: "/chats"});
 
 // graceful shutdown
 const listeners = ['SIGINT', 'SIGTERM']

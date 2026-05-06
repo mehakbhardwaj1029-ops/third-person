@@ -22,5 +22,6 @@ export async function uploadFileRoutes(app: FastifyInstance ){
         preHandler: authMiddleware,
         handler: getChatAnalysisController
     });
+
 }
    
