@@ -14,14 +14,20 @@ function getFieldValue(field: any): string | undefined {
 
   return undefined;
 }
+
 export const uploadFileController = async(
     request: FastifyRequest,
     reply: FastifyReply
 )=>{
+    const log = request.log;
+
     try{
+        log.info("Upload file request received");
+
         const userId = (request.user as { id: string } | undefined)?.id;
 
         if (!userId) {
+            log.warn("Unauthorized upload attempt");
             return reply.status(401).send({
                 message: "Unauthorized",
             });
@@ -29,8 +35,8 @@ export const uploadFileController = async(
 
         const data = await request.file();
 
-
         if(!data){
+            log.warn({ userId }, "No file uploaded");
             return reply.status(400).send({
                 message: "No file uploaded",
             });
@@ -47,8 +53,11 @@ export const uploadFileController = async(
 
         const filename = data.filename || "unknown.txt";
 
+        log.info({ userId, filename, sourceApp, tone }, "File metadata extracted");
 
         const buffer = await data.toBuffer();
+
+        log.info({ userId, size: buffer.length }, "File buffer created");
 
         const chat = await uploadChatService({
             userId,
@@ -57,7 +66,9 @@ export const uploadFileController = async(
             fileBuffer: buffer,
             sourceApp,
             tone,
-        });
+        }, { log }); 
+
+        log.info({ userId, chatId: chat.id }, "File uploaded successfully");
 
         return reply.status(201).send({
             id: chat.id,
@@ -66,11 +77,10 @@ export const uploadFileController = async(
             status: chat.status,
         })
 
-
     }catch(error: any){
 
-        console.error("UPLOAD ERROR => ", error);
-        
+    log.error(error, "Upload failed");
+
     if(error.name === "ZodError"){
 
         return reply.status(400).send({

@@ -12,93 +12,88 @@ import {
 import { registerUser, loginUser } from "../services/auth.service";
 
 export async function registerController(
-    request: FastifyRequest,
-    reply: FastifyReply
-){
-    try{
+  request: FastifyRequest,
+  reply: FastifyReply
+) {
+  const log = request.log;
 
-        //validate
-        const data: CreateUserInput = createUserSchema.parse(request.body);
+  try {
+    log.info("Register request received");
 
-        //call service
-        const user = await registerUser(data);
+    const data: CreateUserInput = createUserSchema.parse(request.body);
 
-        //format response
-        const response = createUserResponseSchema.parse({
-            id: user.id,
-            email:user.email,
-            name: user.name,
-            createdAt: user.createdAt.toISOString(),
-        })
-        return reply.code(201).send(response);
+    const user = await registerUser(data, { log });
 
-    }catch(error: any){
-       request.log.error(error);
+    const response = createUserResponseSchema.parse({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt.toISOString(),
+    });
 
-       if(error.name === "ZodError"){
-        return reply.status(400).send({
-            message: "Valiation failed",
-            errors: error.errors,
-        });
-       }
+    log.info({ userId: response.id }, "User registered");
 
-       if(error.message === "Not allowed"){
-        return reply.status(409).send({
-            message: "User already exist",
-            errors: error.errors,
-        })
-       }
+    return reply.code(201).send(response);
 
-       return reply.status(500).send({
-        message: "Internal server error",
-       })
+  } catch (error: any) {
+    log.error(error, "Register failed");
 
+    if (error.name === "ZodError") {
+      return reply.status(400).send({
+        message: "Validation failed",
+        errors: error.errors,
+      });
     }
+
+    if (error.message === "Not allowed") {
+      return reply.status(409).send({
+        message: "User already exists",
+      });
+    }
+
+    return reply.status(500).send({
+      message: "Internal server error",
+    });
+  }
 }
 
 export async function loginController(
-    request: FastifyRequest,
-    reply: FastifyReply,
-){
+  request: FastifyRequest,
+  reply: FastifyReply
+) {
+  const log = request.log;
 
-    try{
-        //validate
-       const data: LoginUserInput = loginUserSchema.parse(request.body);
+  try {
+    log.info("Login request received");
 
-       //call service
-       const result = await loginUser(data);
+    const data: LoginUserInput = loginUserSchema.parse(request.body);
 
-       //validate response
-       const response = loginResponseSchema.parse(result);
+    const result = await loginUser(data, { log });
 
-       return reply.code(200).send(response);
+    const response = loginResponseSchema.parse(result);
 
-    }
-    catch(error: any){
+    log.info({ email: data.email }, "Login success");
 
-        if(error.name === "ZodError"){
-            return reply.status(400).send({
-            message: "Valiation failed",
-            errors: error.errors,
-        });
-        }
+    return reply.code(200).send(response);
 
-        if(error.message === "Not allowed"){
-            return reply.status(409).send({
-            message: "User already exist",
-            errors: error.errors,
-        })
-        }
+  } catch (error: any) {
+    log.error(error, "Login failed");
 
-        if (error.message === "Invalid email or password") {
-        return reply.status(401).send({ message: error.message });
-        }
-
-        return reply.status(500).send({
-            message: "Internal Server Error",
-        })
+    if (error.name === "ZodError") {
+      return reply.status(400).send({
+        message: "Validation failed",
+        errors: error.errors,
+      });
     }
 
+    if (error.message === "Invalid email or password") {
+      return reply.status(401).send({ message: error.message });
+    }
+
+    return reply.status(500).send({
+      message: "Internal Server Error",
+    });
+  }
 }
 
 

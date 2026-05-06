@@ -1,7 +1,10 @@
 import  prisma  from "../utils/prisma";
 import { generateHash } from "../utils/hash.utils";
 import { chunkDocument } from "./chunkApi.service";
- 
+
+type Context = {
+  log: any;
+};
 
 type UploadChatInput = {
     userId: string,
@@ -18,15 +21,17 @@ type Chunk = {
    wordCount: number;
 };
 
+export async function uploadChatService(data: UploadChatInput, ctx: Context){
+    const { log } = ctx;
+    const { userId, fileBuffer,filename, fileUrl, sourceApp, tone = "COACH" } = data;
 
-export async function uploadChatService(data: UploadChatInput){
-    const { userId, fileBuffer,filename, fileUrl, sourceApp, tone = "COACH" } = data;    // issue - file is getting uploaded twice ,one while hitting controller and then while chunking
+    log.info({ userId, filename }, "Upload service started");
 
-    //call chunk service
-    const { chunks, participants} = await chunkDocument(fileBuffer,filename);
-    console.log(chunks);  
-    console.log(participants);
-    //create chat
+    const { chunks, participants} = await chunkDocument(fileBuffer, filename, { log });
+
+    log.info({ chunkCount: chunks.length }, "Chunking completed");
+    log.info({ participants }, "Participants detected");
+
     const chat = await prisma.chat.create({
     data: {
         userId,
@@ -36,37 +41,28 @@ export async function uploadChatService(data: UploadChatInput){
         fileUrl,
         status: "CHUNKED",
 
-        // temporary placeholders
         messageCount: 0,
         participants,
-        fileHash: "",    // will add in future
+        fileHash: "",
         rawText: "",
     }
     });
-    
- console.log(
-  chunks.map((chunk: Chunk) => ({
-    content: chunk.content,
-    hash: generateHash(chunk.content)
-  }))
-);
 
- // create chunk entities
+    log.info({ chatId: chat.id }, "Chat created");
+
+
 await prisma.chunk.createMany({
    data: chunks.map((chunk: Chunk) => ({
       chatId: chat.id,
-
       order: chunk.order,
-
       content: chunk.content,
-
       tokenCount: chunk.wordCount,
-
       chunkHash: generateHash(chunk.content),
-
       status: "CHUNKED",
    }))
 });
+
+    log.info({ chatId: chat.id, count: chunks.length }, "Chunks stored");
+
 return chat;
 }
- 

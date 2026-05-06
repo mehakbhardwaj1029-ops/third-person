@@ -1,6 +1,17 @@
 import prisma from "../utils/prisma";
 
-export async function getAllChatsService(userId: string) {
+type Context = {
+  log: any;
+};
+
+export async function getAllChatsService(
+  userId: string,
+  ctx: Context
+) {
+  const { log } = ctx;
+
+  log.info({ userId }, "Querying chats from DB");
+
   const chats = await prisma.chat.findMany({
     where: { userId },
 
@@ -18,6 +29,8 @@ export async function getAllChatsService(userId: string) {
       createdAt: "desc",
     },
   });
+
+  log.info({ userId, count: chats.length }, "Chats query completed");
 
   return chats;
 }
