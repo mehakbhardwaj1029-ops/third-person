@@ -1,5 +1,4 @@
 import {FastifyRequest, FastifyReply} from 'fastify';
-import '../types/fastify.d';
 import { uploadChatService } from '../services/fileChat.service';
 
 function getFieldValue(field: any): string | undefined {

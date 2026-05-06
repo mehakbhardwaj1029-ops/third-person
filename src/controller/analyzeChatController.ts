@@ -1,5 +1,4 @@
 import { FastifyRequest, FastifyReply } from "fastify";
-import '../types/fastify.d';
 import { analyzeChatService } from "../services/analysis.service";
 import prisma from "../utils/prisma";
 
