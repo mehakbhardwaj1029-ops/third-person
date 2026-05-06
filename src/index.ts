@@ -12,8 +12,19 @@ import chatRoutes from './routes/chat.route';
 
 const app = Fastify({ logger: true });
 
-app.register(cors,{
-  origin: "http://localhost:5173",
+app.register(cors, {
+  origin: (origin, cb) => {
+    const allowedOrigins = [
+      process.env.FRONTEND_URL,
+      "http://localhost:5173", 
+    ];
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Not allowed by CORS"), false);
+    }
+  },
 });
 app.register(cookie);
 app.register(helmet);
