@@ -15,7 +15,7 @@ const app = Fastify({ logger: true });
 app.register(cors, {
   origin: (origin, cb) => {
     const allowedOrigins = [
-      process.env.FRONTEND_URL,
+      process.env.API_URL,
       "http://localhost:5173", 
     ];
 
