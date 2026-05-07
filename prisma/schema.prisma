@@ -54,6 +54,7 @@ model Chat {
 model ChatAnalysis {
   id                 String   @id @default(cuid())
   chatId             String   @unique
+  fileHash           String
   chat               Chat     @relation(fields: [chatId], references: [id])
   summary            String?  @db.Text
   compatibilityScore Int

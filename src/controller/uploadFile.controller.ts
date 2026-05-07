@@ -59,7 +59,7 @@ export const uploadFileController = async(
 
         log.info({ userId, size: buffer.length }, "File buffer created");
 
-        const chat = await uploadChatService({
+        const result = await uploadChatService({
             userId,
             fileUrl,
             filename,
@@ -68,14 +68,16 @@ export const uploadFileController = async(
             tone,
         }, { log }); 
 
-        log.info({ userId, chatId: chat.id }, "File uploaded successfully");
+        log.info({ userId, chatId: result.chat.id }, "File uploaded successfully");
 
         return reply.status(201).send({
-            id: chat.id,
-            messageCount: chat.messageCount,
-            participants: chat.participants,
-            status: chat.status,
-        })
+        id: result.chat.id,
+        messageCount: result.chat.messageCount,
+        participants: result.chat.participants,
+        status: result.chat.status,
+
+        uploadType: result.uploadType,
+    });
 
     }catch(error: any){
 
@@ -89,10 +91,9 @@ export const uploadFileController = async(
         });
     }
 
-    if(error.message === "Not allowed"){
-
+    if(error.message === "CHAT_ALREADY_EXISTS"){
         return reply.status(409).send({
-            message: "User already exists",
+            message: "Chat already analyzed"
         });
     }
 

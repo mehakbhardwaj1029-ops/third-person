@@ -193,6 +193,7 @@ async function saveChatAnalysis(chat: any, llm: any) {
   return prisma.chatAnalysis.upsert({
     where: { chatId: chat.id },
     update: {
+      fileHash: chat.fileHash,
       summary: llm.summary,
       compatibilityScore: llm.compatibilityScore,
       userInsights: llm.userInsights,
@@ -201,6 +202,7 @@ async function saveChatAnalysis(chat: any, llm: any) {
     },
     create: {
       chatId: chat.id,
+      fileHash: chat.fileHash,
       summary: llm.summary,
       compatibilityScore: llm.compatibilityScore,
       userInsights: llm.userInsights,

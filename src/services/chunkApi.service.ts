@@ -1,52 +1,148 @@
+import crypto from "crypto";
+
+export interface Chunk {
+  chunkId: string;
+  order: number;
+  wordCount: number;
+  tokenCount: number;
+  content: string;
+}
+
+export interface ChunkResult {
+  chunks: Chunk[];
+  participants: string[];
+}
+
 export async function chunkDocument(
-  fileBuffer: Buffer,
-  filename: string,
-  ctx: { log: any }
-) {
-  const { log } = ctx;
+  text: string,
+  tokenLimit: number = 1000
+): Promise<ChunkResult> {
 
-  log.info({ filename, size: fileBuffer.length }, "Chunking started");
+  // Match each WhatsApp message block
+  const messageStartRegex =
+    /(\d{2}\/\d{2}\/\d{2},\s\d{1,2}:\d{2}\s(?:am|pm)\s-\s.*?)(?=\d{2}\/\d{2}\/\d{2},\s\d{1,2}:\d{2}\s(?:am|pm)\s-|$)/gis;
 
-  const formData = new FormData();
+  const rawMessages =
+    text.match(messageStartRegex)?.map(msg => msg.trim()) || [];
 
-  const uint8Array = new Uint8Array(fileBuffer);
+  const chunks: Chunk[] = [];
 
-  const blob = new Blob([uint8Array], {
-    type: "text/plain",
-  });
+  // Use Set to avoid duplicates
+  const participantSet = new Set<string>();
 
-  formData.append(
-    "file",
-    blob,
-    filename
-  );
+  let currentChunkMessages: string[] = [];
+  let currentTokenCount = 0;
+  let order = 1;
 
-  log.info("Sending request to chunking service");
+  for (const message of rawMessages) {
 
-  const response = await fetch(
-    "https://document-chunker.onrender.com/chat/chunk/message/api",
-    {
-      method: "POST",
-      body: formData,
+    // Extract participant from every message
+    const sender = extractParticipant(message);
+
+    if (sender) {
+      participantSet.add(sender);
     }
-  );
 
-  if (!response.ok) {
-    log.error(
-      { status: response.status },
-      "Chunking service failed"
-    );
-    throw new Error("Chunking service failed");
+    const estimatedTokens = estimateTokens(message);
+
+    // Huge single message case
+    if (estimatedTokens > tokenLimit) {
+
+      if (currentChunkMessages.length > 0) {
+        const chunkContent = currentChunkMessages.join("\n");
+
+        chunks.push(
+          createChunk(
+            chunkContent,
+            order++,
+            currentTokenCount
+          )
+        );
+
+        currentChunkMessages = [];
+        currentTokenCount = 0;
+      }
+
+      chunks.push(
+        createChunk(
+          message,
+          order++,
+          estimatedTokens
+        )
+      );
+
+      continue;
+    }
+
+    // If chunk exceeds limit
+    if (currentTokenCount + estimatedTokens > tokenLimit) {
+
+      const chunkContent = currentChunkMessages.join("\n");
+
+      chunks.push(
+        createChunk(
+          chunkContent,
+          order++,
+          currentTokenCount
+        )
+      );
+
+      currentChunkMessages = [];
+      currentTokenCount = 0;
+    }
+    
+    currentChunkMessages.push(message);
+    currentTokenCount += estimatedTokens;
   }
 
-  log.info("Chunking response received");
+  // Final chunk
+  if (currentChunkMessages.length > 0) {
+    const chunkContent = currentChunkMessages.join("\n");
 
-  const result = await response.json();
+    chunks.push(
+      createChunk(
+        chunkContent,
+        order++,
+        currentTokenCount
+      )
+    );
+  }
 
-  log.info(
-    { chunkCount: result?.chunks?.length },
-    "Chunking completed"
+  return {
+    chunks,
+    participants: Array.from(participantSet)
+  };
+}
+
+function extractParticipant(message: string): string | null {
+
+  // Example:
+  // 22/01/26, 3:52 pm - Rahul: Hello
+
+  const match = message.match(
+    /^\d{2}\/\d{2}\/\d{2},\s\d{1,2}:\d{2}\s(?:am|pm)\s-\s([^:]+):/i
   );
 
-  return result;
+  if (!match) return null;
+
+  return match[1].trim();
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.split(/\s+/).length * 1.3);
+}
+
+function createChunk(
+  content: string,
+  order: number,
+  tokenCount: number
+): Chunk {
+
+  return {
+    chunkId: crypto.randomUUID(),
+    order,
+    wordCount: content.split(/\s+/).length,
+    tokenCount,
+    content
+  };
 }
