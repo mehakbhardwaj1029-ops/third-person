@@ -2,6 +2,7 @@ import prisma from "../utils/prisma";
 import { parseChunkContent } from "../utils/chatParser";
 import { callLLM } from "./llm.mock";
 import { preLlmGuard } from "../ai/preLlmGuard";
+
 type LLMResponse = {
   summary: string;
 
@@ -48,53 +49,73 @@ type Context = {
 };
 
 export async function analyzeChatService(
-  chatId: string,
+  fileHash: string,
   userId: string,
   ctx: Context
 ) {
   const { log } = ctx;
 
-  log.info({ chatId, userId }, "Finding chat");
+  log.info({ fileHash, userId }, "Finding chat");
 
   const chat = await prisma.chat.findFirst({
-    where: { id: chatId, userId },
+    where: {
+      fileHash,
+      userId,
+    },
   });
 
   if (!chat) {
-    log.warn({ chatId }, "Chat not found");
+    log.warn({ fileHash }, "Chat not found");
     throw new Error("Chat not found");
   }
 
-  log.info({ chatId }, "Marking chat as PROCESSING");
+  log.info({ fileHash }, "Marking chat as PROCESSING");
 
-  await prisma.chat.update({
-    where: { id: chatId },
-    data: { status: "PROCESSING" },
+  await prisma.chat.updateMany({
+    where: {
+      fileHash,
+      userId,
+    },
+    data: {
+      status: "PROCESSING",
+    },
   });
 
-  log.info({ chatId }, "Fetching chunks");
+  log.info({ fileHash }, "Fetching chunks");
 
   const chunks = await prisma.chunk.findMany({
-    where: { chatId },
-    orderBy: { order: "asc" },
+    where: {
+      fileHash,
+    },
+    orderBy: {
+      order: "asc",
+    },
   });
 
   await prisma.chatProcessingState.upsert({
-    where: { chatId },
+    where: {
+      fileHash,
+    },
     update: {
       status: "PROCESSING",
     },
     create: {
-      chatId,
+      fileHash,
+      conversationHash: chat.conversationHash,
       lastChunkIndex: 0,
       rollingSummary: {},
+      messageCount: chat.messageCount,
       status: "PROCESSING",
     },
   });
 
-  const { rollingSummary } = await processChunks(chat, chunks, ctx);
+  const { rollingSummary } = await processChunks(
+    chat,
+    chunks,
+    ctx
+  );
 
-  log.info({ chatId }, "Saving analysis");
+  log.info({ fileHash }, "Saving analysis");
 
   await saveChatAnalysis(chat, rollingSummary);
 
@@ -105,34 +126,77 @@ export async function analyzeChatService(
     ctx
   );
 
-  await finalizeChat(chatId, ctx);
+  await finalizeChat(fileHash, userId, ctx);
 
-  log.info({ chatId }, "Analysis pipeline completed");
+  log.info({ fileHash }, "Analysis pipeline completed");
 
-  return { status: "ANALYZED" };
+  return {
+    status: "ANALYZED",
+  };
 }
 
-async function processChunks(chat: any, chunks: any[], ctx: any) {
+async function processChunks(
+  chat: any,
+  chunks: any[],
+  ctx: any
+) {
   const { log } = ctx;
 
   let rollingSummary: LLMResponse | null = null;
 
-  for (const chunk of chunks) {
-    log.info({ chunkId: chunk.id, order: chunk.order }, "Processing chunk");
+  // load ancestor rolling summary
+  if (
+    chat.resumeFromChunk > 0 &&
+    chat.ancestorFileHash
+  ) {
+    const ancestorState =
+      await prisma.chatProcessingState.findUnique({
+        where: {
+          fileHash: chat.ancestorFileHash,
+        },
+      });
+
+    if (ancestorState?.rollingSummary) {
+      rollingSummary =
+        ancestorState.rollingSummary as LLMResponse;
+    }
+  }
+
+  // process only NEW chunks
+  const chunksToProcess = chunks.filter(
+    (chunk) => chunk.order > chat.resumeFromChunk
+  );
+
+  for (const chunk of chunksToProcess) {
+    log.info(
+      {
+        chunkId: chunk.id,
+        order: chunk.order,
+      },
+      "Processing chunk"
+    );
 
     const parsed = parseChunkContent(chunk.content);
 
     const formatted = parsed
-      .map((m) => `[${m.timestamp}] ${m.sender}: ${m.message}`)
+      .map(
+        (m) =>
+          `[${m.timestamp}] ${m.sender}: ${m.message}`
+      )
       .join("\n");
 
     const guard = preLlmGuard(formatted);
 
     if (!guard.safeForLlm) {
-      log.warn({ chatId: chat.id }, "LLM blocked due to unsafe input");
+      log.warn(
+        { fileHash: chat.fileHash },
+        "LLM blocked due to unsafe input"
+      );
 
       await prisma.chatProcessingState.update({
-        where: { chatId: chat.id },
+        where: {
+          fileHash: chat.fileHash,
+        },
         data: {
           status: "BLOCKED",
           rollingSummary: {
@@ -143,10 +207,15 @@ async function processChunks(chat: any, chunks: any[], ctx: any) {
         },
       });
 
-      throw new Error("LLM blocked due to high-risk input");
+      throw new Error(
+        "LLM blocked due to high-risk input"
+      );
     }
 
-    log.info({ chunkId: chunk.id }, "Calling LLM");
+    log.info(
+      { chunkId: chunk.id },
+      "Calling LLM"
+    );
 
     const response: LLMResponse = await callLLM({
       text: formatted,
@@ -159,25 +228,37 @@ async function processChunks(chat: any, chunks: any[], ctx: any) {
     rollingSummary = response;
 
     await prisma.chunk.update({
-      where: { id: chunk.id },
+      where: {
+        fileHash_order: {
+          fileHash: chat.fileHash,
+          order: chunk.order,
+        },
+      },
       data: {
         summary: response,
         status: "SUMMARIZED",
       },
     });
 
-    const isLastChunk = chunk.order === chunks.length;
+    const isLastChunk =
+      chunk.order === chunks[chunks.length - 1].order;
 
     await prisma.chatProcessingState.update({
-      where: { chatId: chat.id },
+      where: {
+        fileHash: chat.fileHash,
+      },
       data: {
         lastChunkIndex: chunk.order,
-        rollingSummary: rollingSummary,
-        status: isLastChunk ? "ANALYZED" : "PROCESSING",
+        rollingSummary,
+        messageCount: chat.messageCount,
+        status: isLastChunk
+          ? "ANALYZED"
+          : "PROCESSING",
       },
     });
   }
 
+  // if no new chunks were processed but ancestor summary exists
   if (!rollingSummary) {
     log.error("Rolling summary missing");
     throw new Error("LLM processing failed");
@@ -189,13 +270,19 @@ async function processChunks(chat: any, chunks: any[], ctx: any) {
   };
 }
 
-async function saveChatAnalysis(chat: any, llm: any) {
+async function saveChatAnalysis(
+  chat: any,
+  llm: any
+) {
   return prisma.chatAnalysis.upsert({
-    where: { chatId: chat.id },
+    where: {
+      chatId: chat.id,
+    },
     update: {
       fileHash: chat.fileHash,
       summary: llm.summary,
-      compatibilityScore: llm.compatibilityScore,
+      compatibilityScore:
+        llm.compatibilityScore,
       userInsights: llm.userInsights,
       overallInsights: llm.overallInsights,
       tone: chat.tone,
@@ -204,7 +291,8 @@ async function saveChatAnalysis(chat: any, llm: any) {
       chatId: chat.id,
       fileHash: chat.fileHash,
       summary: llm.summary,
-      compatibilityScore: llm.compatibilityScore,
+      compatibilityScore:
+        llm.compatibilityScore,
       userInsights: llm.userInsights,
       overallInsights: llm.overallInsights,
       tone: chat.tone,
@@ -220,22 +308,26 @@ async function saveParticipantsAndRelations(
 ) {
   const { log } = ctx;
 
-  log.info({ chatId: chat.id }, "Saving participants");
+  log.info(
+    { chatId: chat.id },
+    "Saving participants"
+  );
 
   for (const p of llm.participants) {
-    const participant = await prisma.participant.upsert({
-      where: {
-        userId_name: {
+    const participant =
+      await prisma.participant.upsert({
+        where: {
+          userId_name: {
+            userId,
+            name: p.name,
+          },
+        },
+        update: {},
+        create: {
           userId,
           name: p.name,
         },
-      },
-      update: {},
-      create: {
-        userId,
-        name: p.name,
-      },
-    });
+      });
 
     await prisma.chatParticipant.upsert({
       where: {
@@ -263,7 +355,8 @@ async function saveParticipantsAndRelations(
         emotions: p.emotions,
         mbtiType: p.mbti.type,
         mbtiMeta: p.mbti,
-        behaviourPatterns: p.behaviourPatterns,
+        behaviourPatterns:
+          p.behaviourPatterns,
       },
       create: {
         chatId: chat.id,
@@ -272,19 +365,27 @@ async function saveParticipantsAndRelations(
         emotions: p.emotions,
         mbtiType: p.mbti.type,
         mbtiMeta: p.mbti,
-        behaviourPatterns: p.behaviourPatterns,
+        behaviourPatterns:
+          p.behaviourPatterns,
       },
     });
   }
 }
 
-async function finalizeChat(chatId: string, ctx: any) {
+async function finalizeChat(
+  fileHash: string,
+  userId: string,
+  ctx: any
+) {
   const { log } = ctx;
 
-  log.info({ chatId }, "Finalizing chat");
+  log.info({ fileHash }, "Finalizing chat");
 
-  await prisma.chat.update({
-    where: { id: chatId },
+  await prisma.chat.updateMany({
+    where: {
+      fileHash,
+      userId,
+    },
     data: {
       status: "ANALYZED",
     },

@@ -8,72 +8,75 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  createdAt DateTime @default(now())
-  chats     Chat[]
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String
+  password          String
+  createdAt         DateTime @default(now())
+  chats             Chat[]
 
   @@map("users")
 }
 
 model Chat {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  id                  String @id @default(cuid())
+  userId              String
+  user                User   @relation(fields: [userId], references: [id])
 
-  fileHash String
+  fileHash            String
+  conversationHash    String
+  resumeFromChunk Int @default(1)
+  ancestorFileHash String?
 
-  title String @default("Untitled Chat")
+  title               String @default("Untitled Chat")
 
-  rawText String @db.Text
+  rawText             String @db.Text
 
-  fileUrl    String?
-  parsedJson Json?
+  fileUrl             String?
+  parsedJson          Json?
 
-  tone   String @default("COACH")
-  status          String @default("UPLOADED")
+  tone                String @default("COACH")
+  status              String @default("UPLOADED")
 
-  sourceApp       String
-  messageCount    Int
-  participants    String[]
-  userParticipant String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  sourceApp           String
+  messageCount        Int
+  participants        String[]
+  userParticipant     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   analysis            ChatAnalysis?
   chatParticipants    ChatParticipant[]
   participantAnalysis ParticipantAnalysis[]
-  chunks              Chunk[]
   @@index([userId])
   @@index([fileHash])
+  @@index([conversationHash])
   @@map("file_chats")
 }
 
 model ChatAnalysis {
-  id                 String   @id @default(cuid())
-  chatId             String   @unique
-  fileHash           String
-  chat               Chat     @relation(fields: [chatId], references: [id])
-  summary            String?  @db.Text
-  compatibilityScore Int
-  userInsights       Json
-  overallInsights    Json
-  tone               String
-  createdAt          DateTime @default(now())
+  id                   String   @id @default(cuid())
+  chatId               String   @unique
+  fileHash             String
+  chat                 Chat     @relation(fields: [chatId], references: [id])
+  summary              String?  @db.Text
+  compatibilityScore   Int
+  userInsights         Json
+  overallInsights      Json
+  tone                 String
+  createdAt            DateTime @default(now())
 
   @@index([chatId])
   @@map("chat_analyses")
 }
 
 model Participant {
-  id        String                @id @default(cuid())
-  name      String
-  userId    String
-  chats     ChatParticipant[]
-  createdAt DateTime              @default(now())
-  analyses  ParticipantAnalysis[]
+  id                    String                @id @default(cuid())
+  name                  String
+  userId                String
+  chats                 ChatParticipant[]
+  createdAt             DateTime              @default(now())
+  analyses              ParticipantAnalysis[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -81,29 +84,29 @@ model Participant {
 }
 
 model ChatParticipant {
-  id            String @id @default(cuid())
-  chatId        String
-  participantId String
+  id                      String @id @default(cuid())
+  chatId                  String
+  participantId           String
 
-  chat        Chat        @relation(fields: [chatId], references: [id])
-  participant Participant @relation(fields: [participantId], references: [id])
+  chat                    Chat        @relation(fields: [chatId], references: [id])
+  participant             Participant @relation(fields: [participantId], references: [id])
 
   @@unique([chatId, participantId], name: "chatId_participantId")
   @@map("chat_participants")
 }
 
 model ParticipantAnalysis {
-  id                String      @id @default(cuid())
-  chatId            String
-  chat              Chat        @relation(fields: [chatId], references: [id])
-  participantId     String
-  participant       Participant @relation(fields: [participantId], references: [id])
-  traits            Json
-  emotions          Json
-  mbtiType          String
-  mbtiMeta          Json
-  behaviourPatterns Json
-  createdAt         DateTime    @default(now())
+  id                      String      @id @default(cuid())
+  chatId                  String
+  chat                    Chat        @relation(fields: [chatId], references: [id])
+  participantId           String
+  participant             Participant @relation(fields: [participantId], references: [id])
+  traits                  Json
+  emotions                Json
+  mbtiType                String
+  mbtiMeta                Json
+  behaviourPatterns       Json
+  createdAt               DateTime    @default(now())
 
   @@index([chatId])
   @@unique([chatId, participantId], name: "chatId_participantId")
@@ -111,36 +114,35 @@ model ParticipantAnalysis {
 }
 
 model Chunk{
-  id   String   @id @default(cuid())
+  id                       String   @id @default(cuid())
+  fileHash                 String   
+  conversationHash         String
+  order                    Int
+  content                  String   @db.Text
+  chunkHash                String   
+  status                   String   @default("READY")
+  summary                  Json?
+  embeddingId              String?
+  tokenCount               Int?
+  createdAt                DateTime @default(now())
 
-  chatId        String
-
-  order         Int
-
-  content       String   @db.Text
-
-  chunkHash     String   @unique
-
-  status        String   @default("READY")
-
-  summary       Json?
-
-  embeddingId   String?
-
-  tokenCount    Int?
-
-  createdAt     DateTime @default(now())
-
-  chat          Chat @relation(fields: [chatId], references: [id])
-
+  @@unique([fileHash, order])
+  @@index([conversationHash])
+  @@index([chunkHash])
+  @@map("chunk")
 }
 
 
 model ChatProcessingState {
-  id             String @id @default(cuid())
-  chatId         String @unique
-  lastChunkIndex Int
-  rollingSummary Json?
-  status         String @default("PROCESSING") 
+  id                       String @id @default(cuid())
+  fileHash                 String @unique
+  conversationHash         String
+  lastChunkIndex           Int
+  rollingSummary           Json?
+  messageCount             Int
+  status                   String @default("PROCESSING") 
+  createdAt                DateTime @default(now())
+@@index([conversationHash])
+@@map("chat_processing_state")
 }
 

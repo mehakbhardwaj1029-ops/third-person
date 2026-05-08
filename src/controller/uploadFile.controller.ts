@@ -71,7 +71,7 @@ export const uploadFileController = async(
         log.info({ userId, chatId: result.chat.id }, "File uploaded successfully");
 
         return reply.status(201).send({
-        id: result.chat.id,
+        fileHash: result.chat.fileHash,
         messageCount: result.chat.messageCount,
         participants: result.chat.participants,
         status: result.chat.status,

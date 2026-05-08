@@ -11,6 +11,8 @@ export interface Chunk {
 export interface ChunkResult {
   chunks: Chunk[];
   participants: string[];
+  conversationHash: string;
+  messageCount: number; 
 }
 
 export async function chunkDocument(
@@ -25,9 +27,12 @@ export async function chunkDocument(
   const rawMessages =
     text.match(messageStartRegex)?.map(msg => msg.trim()) || [];
 
+  const messageCount = rawMessages.length;
+
+
   const chunks: Chunk[] = [];
 
-  // Use Set to avoid duplicates
+  //avoid duplicates
   const participantSet = new Set<string>();
 
   let currentChunkMessages: string[] = [];
@@ -107,17 +112,23 @@ export async function chunkDocument(
       )
     );
   }
+  const participants = Array.from(participantSet);
+
+  const conversationHash = generateConversationHash(rawMessages,participants);
 
   return {
     chunks,
-    participants: Array.from(participantSet)
+    participants: Array.from(participantSet),
+    conversationHash,
+    messageCount
+
   };
 }
 
 function extractParticipant(message: string): string | null {
 
-  // Example:
-  // 22/01/26, 3:52 pm - Rahul: Hello
+  
+  // 22/01/26, 3:52 pm - Mehak: Hello , match
 
   const match = message.match(
     /^\d{2}\/\d{2}\/\d{2},\s\d{1,2}:\d{2}\s(?:am|pm)\s-\s([^:]+):/i
@@ -145,4 +156,51 @@ function createChunk(
     tokenCount,
     content
   };
+}
+
+function generateConversationHash(
+  messages: string[],
+  participants: string[]
+): string {
+
+  //  first 20 messages 
+  const seedMessages = messages
+    .slice(0, 20)
+    .map(normalizeMessage)
+    .join("\n");
+
+  // Stable participant ordering
+  const normalizedParticipants = [...participants]
+    .sort()
+    .join("|");
+
+  const hashInput = `
+    ${normalizedParticipants}
+    ${seedMessages}
+  `;
+
+  return crypto
+    .createHash("sha256")
+    .update(hashInput)
+    .digest("hex");
+}
+
+function normalizeMessage(message: string): string {
+
+  return (
+    message
+
+      // remove timestamps
+      .replace(
+        /^\d{2}\/\d{2}\/\d{2},\s\d{1,2}:\d{2}\s(?:am|pm)\s-\s/i,
+        ""
+      )
+
+      // collapse spaces
+      .replace(/\s+/g, " ")
+
+      .trim()
+
+      .toLowerCase()
+  );
 }

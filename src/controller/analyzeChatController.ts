@@ -20,28 +20,28 @@ export const analyzeChatController = async (
       });
     }
 
-    const { chatId } = request.params as { chatId: string };
+    const { fileHash } = request.params as { fileHash: string };
 
-    if (!chatId) {
+    if (!fileHash) {
       log.warn("Missing chatId");
       return reply.status(400).send({
         message: "Chat ID is required",
       });
     }
 
-    log.info({ chatId, userId }, "Starting analysis");
+    log.info({ fileHash, userId }, "Starting analysis");
 
-    const analysis = await analyzeChatService(chatId, userId, { log });
+    const analysis = await analyzeChatService(fileHash, userId, { log });
 
     if ("status" in analysis && analysis.status === "PROCESSING") {
-      log.info({ chatId }, "Analysis in progress");
+      log.info({ fileHash }, "Analysis in progress");
       return reply.status(202).send({
         message: "Analysis in progress",
         status: "PROCESSING",
       });
     }
 
-    log.info({ chatId }, "Analysis completed");
+    log.info({ fileHash }, "Analysis completed");
 
     return reply.status(200).send({
       message: "Analysis completed successfully",
@@ -87,34 +87,34 @@ export const getChatAnalysisController = async (
       return reply.status(401).send({ message: "Unauthorized" });
     }
 
-    const { chatId } = request.params as { chatId: string };
+    const { fileHash } = request.params as { fileHash: string };
 
-    log.info({ chatId, userId }, "Fetching chat");
+    log.info({ fileHash, userId }, "Fetching chat");
 
     const chat = await prisma.chat.findFirst({
-      where: { id: chatId, userId },
+      where: {  fileHash, userId },
     });
 
     if (!chat) {
-      log.warn({ chatId }, "Chat not found");
+      log.warn({ fileHash }, "Chat not found");
       return reply.status(404).send({
         message: "Chat not found",
       });
     }
 
     const state = await prisma.chatProcessingState.findUnique({
-      where: { chatId },
+      where: { fileHash },
     });
 
     if (!state) {
-      log.info({ chatId }, "Analysis not started");
+      log.info({ fileHash }, "Analysis not started");
       return reply.send({
         status: "NOT_STARTED",
         rollingSummary: null,
       });
     }
 
-    log.info({ chatId }, "Analysis fetched");
+    log.info({ fileHash }, "Analysis fetched");
 
     return reply.send({
       status: state.status,
