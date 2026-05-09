@@ -120,6 +120,7 @@ export const getChatAnalysisController = async (
       status: state.status,
       rollingSummary: state.rollingSummary,
       lastChunkIndex: state.lastChunkIndex,
+      messageCount: state.messageCount,
     });
 
   } catch (error: any) {

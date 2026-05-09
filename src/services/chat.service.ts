@@ -16,7 +16,7 @@ export async function getAllChatsService(
     where: { userId },
 
     select: {
-      id: true,
+      fileHash: true,
       title: true,
       sourceApp: true,
       tone: true,
