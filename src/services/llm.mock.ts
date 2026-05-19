@@ -1,71 +1,192 @@
-type LLMInput = {
+type ChunkLLMInput = {
   text: string;
+
   participants: string[];
+
   userParticipant?: string | null;
+
   tone: string;
 
-  previousState?: any; 
 };
 
+type FinalLLMInput = {
+  behavioralState: any;
 
+  participants: string[];
 
-export async function callLLM(input: LLMInput) {
-  console.log(" participants in llm call ", input.participants);
+  userParticipant?: string | null;
 
-  // simulate delay 
-  await new Promise((res) => setTimeout(res, 500));
+  tone: string;
+};
+
+// ======================================================
+// CHUNK ANALYSIS LLM
+// ======================================================
+
+export async function callChunkAnalysisLLM(
+  input: ChunkLLMInput
+) {
+  console.log(
+    "Chunk analysis participants:",
+    input.participants
+  );
+
+  // simulate delay
+  await new Promise((res) =>
+    setTimeout(res, 500)
+  );
 
   return {
-    summary: "This is a mock summary of the conversation showing general interaction patterns between participants.",
+    summary:
+      "Conversation shows emotional reassurance and uneven conversational effort.",
+
+    signals: {
+      emotions: [
+        "support",
+        "trust"
+      ],
+
+      relationshipSignals: [
+        "emotional closeness"
+      ],
+
+      communicationPatterns: [
+        "delayed responses",
+        "one-sided initiation"
+      ]
+    },
+
+    participants: [
+      {
+        name: "Mehak",
+
+        detectedTraits: [
+          "emotionally expressive",
+          "supportive"
+        ],
+
+        emotionalIndicators: [
+          "concerned",
+          "emotionally invested"
+        ],
+
+        behaviorPatterns: [
+          "initiates conversations",
+          "seeks reassurance"
+        ],
+
+        mbtiEvidence: [
+          "INFJ",
+          "INFJ",
+          "INFP"
+        ]
+      }
+    ],
+
+    importantEvents: [
+      "emotional reassurance attempt",
+      "delayed emotional response"
+    ]
+  };
+}
+
+// ======================================================
+// FINAL ANALYSIS LLM
+// ======================================================
+
+export async function callFinalAnalysisLLM(
+  input: FinalLLMInput
+) {
+  console.log(
+    "Final synthesis participants:",
+    input.participants
+  );
+
+  // simulate delay
+  await new Promise((res) =>
+    setTimeout(res, 1000)
+  );
+
+  return {
+    summary:
+      "The conversation reflects a relationship with emotional dependence, uneven communication effort, and recurring reassurance-seeking patterns.",
 
     compatibilityScore: 72,
 
     userInsights: {
       warnings: [
-        "User may be over-investing emotionally",
-        "Potential imbalance in communication effort"
+        "Emotional dependency patterns are increasing.",
+        "Communication imbalance may create future frustration."
       ],
+
       suggestions: [
-        "Try maintaining clearer boundaries",
-        "Encourage balanced participation"
+        "Encourage healthier emotional boundaries.",
+        "Promote balanced conversational effort."
       ],
+
       behavioralAdvice: [
-        "Avoid overthinking delayed responses",
-        "Focus on clarity in communication"
+        "Avoid excessive reassurance-seeking.",
+        "Communicate emotional needs more directly."
       ]
     },
 
     overallInsights: {
-      relationshipType: "Casual / Developing",
-      communicationStyle: "Mixed (sometimes engaging, sometimes distant)",
-      riskLevel: "MEDIUM",
+      relationshipType:
+        "Emotionally Attached",
+
+      communicationStyle:
+        "Supportive but imbalanced",
+
+      riskLevel: "Moderate",
+
       keyObservations: [
-        "One participant initiates more often",
-        "Responses are sometimes delayed",
-        "Emotional tone fluctuates"
+        "One participant initiates most conversations.",
+        "Emotional reassurance is frequently sought.",
+        "Trust and emotional closeness are increasing."
       ]
     },
 
-    participants: input.participants.map((name) => ({
-      name,
-      traits: {
-        positive: ["Friendly", "Engaging"],
-        negative: ["Inconsistent", "Reserved"]
-      },
-      emotions: {
-        dominant: ["Curious", "Neutral"],
-        secondary: ["Anxious"]
-      },
-      mbti: {
-        type: "INFP",
-        confidence: 0.65,
-        explanation: "Shows introspection and emotional sensitivity"
-      },
-      behaviourPatterns: [
-        "Occasional delayed replies",
-        "Emotional expression varies",
-        "Responds more than initiates"
-      ]
-    }))
+    participants: [
+      {
+        name: "Mehak",
+
+        traits: {
+          positive: [
+            "empathetic",
+            "emotionally expressive"
+          ],
+
+          negative: [
+            "overthinks emotional signals"
+          ]
+        },
+
+        emotions: {
+          dominant: [
+            "concern",
+            "attachment"
+          ],
+
+          secondary: [
+            "anxiety"
+          ]
+        },
+
+        mbti: {
+          type: "INFJ",
+
+          confidence: 0.82,
+
+          explanation:
+            "Frequent emotionally reflective and supportive communication patterns indicate INFJ-like tendencies."
+        },
+
+        behaviourPatterns: [
+          "initiates emotional conversations",
+          "seeks reassurance",
+          "emotionally analyzes interactions"
+        ]
+      }
+    ]
   };
 }

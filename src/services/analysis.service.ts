@@ -1,7 +1,34 @@
 import prisma from "../utils/prisma";
 import { parseChunkContent } from "../utils/chatParser";
-import { callLLM } from "./llm.mock";
+import { callChunkAnalysisLLM } from "./llm.mock";
 import { preLlmGuard } from "../ai/preLlmGuard";
+import { analyzeOptimization, optimizeChunkForLLM } from "./tokenOptimization.service";
+import { BehavioralState, createEmptyBehavioralState, evolveBehavioralState } from './behaviourEvolution.service';
+import { generateFinalAnalysisService } from "./generateFinalAnalysis.service";
+
+type ChunkAnalysis = {
+  summary: string;
+
+  signals: {
+    emotions: string[];
+    relationshipSignals: string[];
+    communicationPatterns: string[];
+  };
+
+  participants: {
+    name: string;
+
+    detectedTraits: string[];
+
+    emotionalIndicators: string[];
+
+    behaviorPatterns: string[];
+
+    mbtiEvidence: string[];
+  }[];
+
+  importantEvents: string[];
+};
 
 type LLMResponse = {
   summary: string;
@@ -69,17 +96,57 @@ export async function analyzeChatService(
     throw new Error("Chat not found");
   }
 
-  log.info({ fileHash }, "Marking chat as PROCESSING");
+  log.info({ fileHash }, "Fetching processing state");
 
-  await prisma.chat.updateMany({
-    where: {
+  const processingState =
+    await prisma.chatProcessingState.findUnique({
+      where: {
+        fileHash,
+      },
+    });
+
+  const summarizedUntil =
+    processingState?.lastChunkSummarized || 0;
+
+  const evolvedUntil =
+    processingState?.lastChunkBehaviorEvolved || 0;
+
+  const finalGenerated =
+    processingState?.finalAnalysisGenerated || false;
+
+    if (finalGenerated) {
+    return {
+      status: "COMPLETED",
+    };
+  }
+
+// chunk analysis + behavior evolution done
+// final synthesis still pending
+ 
+  const totalChunks =
+  processingState?.totalChunks || 0;
+
+const behaviorEvolutionCompleted =
+  summarizedUntil === totalChunks &&
+  evolvedUntil === totalChunks;
+
+if (
+  behaviorEvolutionCompleted &&
+  !finalGenerated
+) {
+
+  const finalResponse =
+    await generateFinalAnalysisService(
       fileHash,
       userId,
-    },
-    data: {
-      status: "PROCESSING",
-    },
-  });
+      ctx
+    );
+
+  return {
+    status: finalResponse.status,
+    response: finalResponse.response,
+  };
+}
 
   log.info({ fileHash }, "Fetching chunks");
 
@@ -92,80 +159,104 @@ export async function analyzeChatService(
     },
   });
 
-  await prisma.chatProcessingState.upsert({
+  const lastChunk =
+    chunks[chunks.length - 1];
+  
+
+  log.info({ fileHash }, "Marking chat as PROCESSING");
+
+  await prisma.chat.updateMany({
     where: {
       fileHash,
+      userId,
     },
-    update: {
-      status: "PROCESSING",
-    },
-    create: {
-      fileHash,
-      conversationHash: chat.conversationHash,
-      lastChunkIndex: 0,
-      rollingSummary: {},
-      messageCount: chat.messageCount,
+    data: {
       status: "PROCESSING",
     },
   });
 
-  const { rollingSummary } = await processChunks(
+  await prisma.chatProcessingState.update({
+  where: {
+    fileHash,
+  },
+
+  data: {
+    currentStage: "CHUNK_ANALYSIS",
+  },
+});
+
+  const response = await processChunks(
     chat,
     chunks,
+    evolvedUntil,
     ctx
   );
 
-  log.info({ fileHash }, "Saving analysis");
+  log.info(
+    { fileHash },
+    "Chunk processing completed"
+  );
 
-  await saveChatAnalysis(chat, rollingSummary);
-
-  await saveParticipantsAndRelations(
-    chat,
+  const finalResponse = await generateFinalAnalysisService(
+    fileHash,
     userId,
-    rollingSummary,
     ctx
   );
-
-  await finalizeChat(fileHash, userId, ctx);
-
-  log.info({ fileHash }, "Analysis pipeline completed");
 
   return {
-    status: "ANALYZED",
+    status: finalResponse.status,
+    response: finalResponse.response
   };
 }
 
 async function processChunks(
   chat: any,
   chunks: any[],
+  evolvedUntil: number,
   ctx: any
 ) {
   const { log } = ctx;
 
-  let rollingSummary: LLMResponse | null = null;
+  // initialize empty evolving state
+  let behavioralState: BehavioralState =
+    createEmptyBehavioralState();
 
-  // load ancestor rolling summary
+  // load ancestor behavioral state
   if (
     chat.resumeFromChunk > 0 &&
     chat.ancestorFileHash
   ) {
-    const ancestorState =
-      await prisma.chatProcessingState.findUnique({
+    const ancestorBehavioralState =
+      await prisma.behavioralState.findUnique({
         where: {
           fileHash: chat.ancestorFileHash,
         },
       });
 
-    if (ancestorState?.rollingSummary) {
-      rollingSummary =
-        ancestorState.rollingSummary as LLMResponse;
+    if (ancestorBehavioralState?.state) {
+      behavioralState =
+        ancestorBehavioralState.state as BehavioralState;
     }
   }
 
-  // process only NEW chunks
-  const chunksToProcess = chunks.filter(
-    (chunk) => chunk.order > chat.resumeFromChunk
+  // combine ancestor resume logic
+  // + crash recovery logic
+
+  const recoveryPoint = Math.max(
+    chat.resumeFromChunk,
+    evolvedUntil
   );
+
+  const chunksToProcess = chunks.filter(
+    (chunk) => chunk.order > recoveryPoint
+  );
+
+  // no work remaining
+  if (chunksToProcess.length === 0) {
+    return {
+      currentStage: "BEHAVIOR_EVOLVED",
+    };
+  }
 
   for (const chunk of chunksToProcess) {
     log.info(
@@ -176,16 +267,34 @@ async function processChunks(
       "Processing chunk"
     );
 
-    const parsed = parseChunkContent(chunk.content);
+    const parsed = parseChunkContent(
+      chunk.content
+    );
 
-    const formatted = parsed
+    const original = parsed
       .map(
         (m) =>
           `[${m.timestamp}] ${m.sender}: ${m.message}`
       )
       .join("\n");
 
-    const guard = preLlmGuard(formatted);
+    const optimized =
+      optimizeChunkForLLM(parsed);
+
+    const stats = analyzeOptimization(
+      original,
+      optimized
+    );
+
+    log.info(
+      {
+        chunkId: chunk.id,
+        stats,
+      },
+      "Chunk optimization stats"
+    );
+
+    const guard = preLlmGuard(optimized);
 
     if (!guard.safeForLlm) {
       log.warn(
@@ -197,12 +306,15 @@ async function processChunks(
         where: {
           fileHash: chat.fileHash,
         },
+
         data: {
-          status: "BLOCKED",
-          rollingSummary: {
-            error: "Blocked due to unsafe content",
+          currentStage: "BLOCKED",
+
+          recoverableError: {
+            reason: "Unsafe content",
             riskLevel: guard.riskLevel,
-            detectedPatterns: guard.detectedPatterns,
+            detectedPatterns:
+              guard.detectedPatterns,
           },
         },
       });
@@ -217,15 +329,18 @@ async function processChunks(
       "Calling LLM"
     );
 
-    const response: LLMResponse = await callLLM({
-      text: formatted,
-      participants: chat.participants,
-      userParticipant: chat.userParticipant,
-      tone: chat.tone,
-      previousState: rollingSummary,
-    });
+    const chunkAnalysis: ChunkAnalysis =
+      await callChunkAnalysisLLM({
+        text: optimized,
+        participants: chat.participants,
+        userParticipant:
+          chat.userParticipant,
+        tone: chat.tone,
+      });
 
-    rollingSummary = response;
+    // SAVE CHUNK SUMMARY FIRST
+    // if crash happens later,
+    // we don't need to rerun LLM
 
     await prisma.chunk.update({
       where: {
@@ -234,160 +349,89 @@ async function processChunks(
           order: chunk.order,
         },
       },
+
       data: {
-        summary: response,
+        summary: chunkAnalysis,
         status: "SUMMARIZED",
       },
     });
 
-    const isLastChunk =
-      chunk.order === chunks[chunks.length - 1].order;
+    // update summarized checkpoint
 
     await prisma.chatProcessingState.update({
       where: {
         fileHash: chat.fileHash,
       },
+
       data: {
-        lastChunkIndex: chunk.order,
-        rollingSummary,
-        messageCount: chat.messageCount,
-        status: isLastChunk
-          ? "ANALYZED"
-          : "PROCESSING",
+        lastChunkSummarized:
+          chunk.order,
+
+        currentStage:
+          "CHUNK_ANALYZED",
       },
     });
-  }
 
-  // if no new chunks were processed but ancestor summary exists
-  if (!rollingSummary) {
-    log.error("Rolling summary missing");
-    throw new Error("LLM processing failed");
+    // evolve behavioral state
+
+    behavioralState =
+      await evolveBehavioralState(
+        behavioralState,
+        chunkAnalysis
+      );
+
+    // persist behavioral state
+
+    await prisma.behavioralState.upsert({
+      where: {
+        fileHash: chat.fileHash,
+      },
+
+      update: {
+        state: behavioralState,
+      },
+
+      create: {
+        fileHash: chat.fileHash,
+
+        conversationHash:
+          chat.conversationHash,
+
+        state: behavioralState,
+      },
+    });
+
+    // update behavior evolution checkpoint
+
+    const isLastChunk =
+      chunk.order ===
+      chunksToProcess[
+        chunksToProcess.length - 1
+      ].order;
+
+    await prisma.chatProcessingState.update({
+      where: {
+        fileHash: chat.fileHash,
+      },
+
+      data: {
+        lastChunkBehaviorEvolved:
+          chunk.order,
+
+        finalAnalysisGenerated: false,
+
+        currentStage: isLastChunk
+          ? "BEHAVIOR_EVOLVED"
+          : "BEHAVIOR_EVOLUTION",
+
+        messageCount:
+          chat.messageCount,
+      },
+    });
   }
 
   return {
-    rollingSummary,
-    status: "ANALYZED",
+    currentStage: "BEHAVIOR_EVOLVED",
   };
 }
 
-async function saveChatAnalysis(
-  chat: any,
-  llm: any
-) {
-  return prisma.chatAnalysis.upsert({
-    where: {
-      chatId: chat.id,
-    },
-    update: {
-      fileHash: chat.fileHash,
-      summary: llm.summary,
-      compatibilityScore:
-        llm.compatibilityScore,
-      userInsights: llm.userInsights,
-      overallInsights: llm.overallInsights,
-      tone: chat.tone,
-    },
-    create: {
-      chatId: chat.id,
-      fileHash: chat.fileHash,
-      summary: llm.summary,
-      compatibilityScore:
-        llm.compatibilityScore,
-      userInsights: llm.userInsights,
-      overallInsights: llm.overallInsights,
-      tone: chat.tone,
-    },
-  });
-}
-
-async function saveParticipantsAndRelations(
-  chat: any,
-  userId: string,
-  llm: LLMResponse,
-  ctx: any
-) {
-  const { log } = ctx;
-
-  log.info(
-    { chatId: chat.id },
-    "Saving participants"
-  );
-
-  for (const p of llm.participants) {
-    const participant =
-      await prisma.participant.upsert({
-        where: {
-          userId_name: {
-            userId,
-            name: p.name,
-          },
-        },
-        update: {},
-        create: {
-          userId,
-          name: p.name,
-        },
-      });
-
-    await prisma.chatParticipant.upsert({
-      where: {
-        chatId_participantId: {
-          chatId: chat.id,
-          participantId: participant.id,
-        },
-      },
-      update: {},
-      create: {
-        chatId: chat.id,
-        participantId: participant.id,
-      },
-    });
-
-    await prisma.participantAnalysis.upsert({
-      where: {
-        chatId_participantId: {
-          chatId: chat.id,
-          participantId: participant.id,
-        },
-      },
-      update: {
-        traits: p.traits,
-        emotions: p.emotions,
-        mbtiType: p.mbti.type,
-        mbtiMeta: p.mbti,
-        behaviourPatterns:
-          p.behaviourPatterns,
-      },
-      create: {
-        chatId: chat.id,
-        participantId: participant.id,
-        traits: p.traits,
-        emotions: p.emotions,
-        mbtiType: p.mbti.type,
-        mbtiMeta: p.mbti,
-        behaviourPatterns:
-          p.behaviourPatterns,
-      },
-    });
-  }
-}
-
-async function finalizeChat(
-  fileHash: string,
-  userId: string,
-  ctx: any
-) {
-  const { log } = ctx;
-
-  log.info({ fileHash }, "Finalizing chat");
-
-  await prisma.chat.updateMany({
-    where: {
-      fileHash,
-      userId,
-    },
-    data: {
-      status: "ANALYZED",
-    },
-  });
-}

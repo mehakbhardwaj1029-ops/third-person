@@ -178,6 +178,26 @@ export async function uploadChatService(
       );
     }
 
+    await prisma.chatProcessingState.create({
+  data: {
+    fileHash,
+
+    conversationHash,
+
+    totalChunks: chunks.length,
+
+    currentStage: "UPLOADED",
+
+    lastChunkSummarized: 0,
+
+    lastChunkBehaviorEvolved: 0,
+
+    finalAnalysisGenerated: false,
+
+    messageCount,
+  },
+});
+
     return {
       chat,
       uploadType: "UPDATED_CHAT_UPLOADED",
@@ -234,6 +254,26 @@ export async function uploadChatService(
     },
     "Chunks stored"
   );
+
+  await prisma.chatProcessingState.create({
+  data: {
+    fileHash,
+
+    conversationHash,
+
+    totalChunks: chunks.length,
+
+    currentStage: "UPLOADED",
+
+    lastChunkSummarized: 0,
+
+    lastChunkBehaviorEvolved: 0,
+
+    finalAnalysisGenerated: false,
+
+    messageCount,
+  },
+});
 
   return {
     chat,
@@ -308,7 +348,7 @@ async function findBestAncestorState(
         lte: currentMessageCount,
       },
 
-      status: "ANALYZED",
+      finalAnalysisGenerated: true
     },
 
     orderBy: [

@@ -6,31 +6,88 @@ type Context = {
 
 export async function getAllChatsService(
   userId: string,
-  ctx: Context
+  limit = 20,
+  cursor?: string,
+  sortOrder: "asc" | "desc" = "desc",
+  search?: string,
+  ctx?: Context
 ) {
-  const { log } = ctx;
+  const { log } = ctx!;
 
-  log.info({ userId }, "Querying chats from DB");
+  log.info(
+    {
+      userId,
+      limit,
+      cursor,
+      sortOrder,
+      search
+    },
+    "Querying chats from DB"
+  );
+
+  const normalizedSearch = search?.trim();
 
   const chats = await prisma.chat.findMany({
-    where: { userId },
+  where: {
+    userId,
 
-    select: {
-      fileHash: true,
-      title: true,
-      sourceApp: true,
-      tone: true,
-      status: true,
-      createdAt: true,
-      messageCount: true,
+    ...(normalizedSearch && {
+      title: {
+        contains: normalizedSearch,
+        mode: "insensitive",
+      },
+    }),
+  },
+
+  take: limit,
+
+  ...(cursor && {
+    cursor: {
+      id: cursor,
     },
+    skip: 1,
+  }),
 
-    orderBy: {
-      createdAt: "desc",
+  orderBy: [
+    {
+      createdAt: sortOrder,
     },
-  });
+    {
+      id: sortOrder,
+    },
+  ],
 
-  log.info({ userId, count: chats.length }, "Chats query completed");
+  select: {
+    id: true,
+    fileHash: true,
+    title: true,
+    sourceApp: true,
+    tone: true,
+    status: true,
+    createdAt: true,
+    messageCount: true,
+  },
+});
 
-  return chats;
+  const hasMore = chats.length === limit;
+
+  const nextCursor = hasMore
+    ? chats[chats.length - 1].id
+    : null;
+
+  log.info(
+    {
+      userId,
+      count: chats.length,
+      hasMore,
+      nextCursor,
+    },
+    "Chats query completed"
+  );
+
+  return {
+    chats,
+    nextCursor,
+    hasMore,
+  };
 }

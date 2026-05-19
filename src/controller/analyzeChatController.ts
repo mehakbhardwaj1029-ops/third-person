@@ -70,7 +70,6 @@ export const analyzeChatController = async (
 };
 
 
-
 export const getChatAnalysisController = async (
   request: FastifyRequest,
   reply: FastifyReply
@@ -80,51 +79,118 @@ export const getChatAnalysisController = async (
   try {
     log.info("Get chat analysis request received");
 
-    const userId = (request.user as { id: string } | undefined)?.id;
+    const userId = (
+      request.user as { id: string } | undefined
+    )?.id;
 
     if (!userId) {
       log.warn("Unauthorized access");
-      return reply.status(401).send({ message: "Unauthorized" });
+
+      return reply.status(401).send({
+        message: "Unauthorized",
+      });
     }
 
-    const { fileHash } = request.params as { fileHash: string };
+    const { fileHash } = request.params as {
+      fileHash: string;
+    };
 
-    log.info({ fileHash, userId }, "Fetching chat");
+    log.info(
+      { fileHash, userId },
+      "Fetching chat"
+    );
 
     const chat = await prisma.chat.findFirst({
-      where: {  fileHash, userId },
+      where: {
+        fileHash,
+        userId,
+      },
     });
 
     if (!chat) {
       log.warn({ fileHash }, "Chat not found");
+
       return reply.status(404).send({
         message: "Chat not found",
       });
     }
 
-    const state = await prisma.chatProcessingState.findUnique({
-      where: { fileHash },
-    });
+    // processing state
 
-    if (!state) {
-      log.info({ fileHash }, "Analysis not started");
+    const processingState =
+      await prisma.chatProcessingState.findUnique({
+        where: {
+          fileHash,
+        },
+      });
+
+    if (!processingState) {
       return reply.send({
         status: "NOT_STARTED",
-        rollingSummary: null,
       });
     }
 
-    log.info({ fileHash }, "Analysis fetched");
+    // final completed analysis
+
+    const finalAnalysis =
+      await prisma.chatAnalysis.findUnique({
+        where: {
+          chatId: chat.id,
+        },
+      });
+
+    // still processing
+
+    if (!finalAnalysis) {
+      return reply.send({
+        status:
+          processingState.currentStage,
+
+        progress: {
+          totalChunks:
+            processingState.totalChunks,
+
+          summarizedChunks:
+            processingState.lastChunkSummarized,
+
+          evolvedChunks:
+            processingState.lastChunkBehaviorEvolved,
+        },
+      });
+    }
+
+    // fetch participant analyses
+
+    const participantAnalyses =
+      await prisma.participantAnalysis.findMany({
+        where: {
+          chatId: chat.id,
+        },
+
+        include: {
+          participant: true,
+        },
+      });
+
+    log.info(
+      { fileHash },
+      "Final analysis fetched"
+    );
 
     return reply.send({
-      status: state.status,
-      rollingSummary: state.rollingSummary,
-      lastChunkIndex: state.lastChunkIndex,
-      messageCount: state.messageCount,
+      status: "COMPLETED",
+
+      analysis: finalAnalysis,
+
+      participants: participantAnalyses,
     });
 
   } catch (error: any) {
-    log.error(error, "Error while fetching summary");
+
+    log.error(
+      error,
+      "Error while fetching analysis"
+    );
 
     return reply.status(500).send({
       message: "Internal Server Error",

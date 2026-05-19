@@ -7,6 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AnalysisStage {
+  UPLOADED
+
+  CHUNK_ANALYSIS
+  CHUNK_ANALYZED
+
+  BEHAVIOR_EVOLUTION
+  BEHAVIOR_EVOLVED
+
+  FINAL_SYNTHESIS
+
+  COMPLETED
+
+  BLOCKED
+  FAILED
+}
+
 model User {
   id                String   @id @default(cuid())
   email             String   @unique
@@ -135,14 +152,51 @@ model Chunk{
 
 model ChatProcessingState {
   id                       String @id @default(cuid())
+
   fileHash                 String @unique
+
   conversationHash         String
-  lastChunkIndex           Int
-  rollingSummary           Json?
+
+  totalChunks              Int
+
+  currentStage             AnalysisStage
+
+  lastChunkSummarized      Int @default(0)
+
+  lastChunkBehaviorEvolved Int @default(0)
+
+  finalAnalysisGenerated   Boolean @default(false)
+
+  recoverableError         Json?
+
   messageCount             Int
-  status                   String @default("PROCESSING") 
+
   createdAt                DateTime @default(now())
-@@index([conversationHash])
-@@map("chat_processing_state")
+
+  updatedAt                DateTime @updatedAt
+
+  @@index([conversationHash])
+  @@map("chat_processing_state")
 }
 
+
+model BehavioralState {
+  id                         String   @id @default(cuid())
+
+  fileHash                   String   @unique
+
+  conversationHash           String
+
+  state                      Json
+
+
+  analysisVersion            Int @default(1)
+
+  updatedAt                  DateTime @updatedAt
+
+  createdAt                  DateTime @default(now())
+
+  @@index([conversationHash])
+
+  @@map("behavioral_state")
+}
